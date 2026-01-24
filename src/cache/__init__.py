@@ -3,4 +3,4 @@
 from .eviction import LRUEvictionPolicy
 from .store import KVStore
 
-__all__ = ["KVStore", "LRUEvictionPolicy"]
+__all__ = ["KVStore", "LRUEvictionPolicy", "OrderedDict"]
