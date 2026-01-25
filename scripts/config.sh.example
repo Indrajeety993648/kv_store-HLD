@@ -12,7 +12,7 @@
 # -----------------------------------------------------------------------------
 # Replace with your Docker Hub username and image name
 # Example: "johndoe/kv-cache:latest"
-DOCKER_IMAGE="YOUR_DOCKERHUB_USERNAME/kv-cache:latest"
+DOCKER_IMAGE="indrajeetyadav89/kv-cache:latest"
 
 # -----------------------------------------------------------------------------
 # AWS Configuration (Optional - defaults provided)
