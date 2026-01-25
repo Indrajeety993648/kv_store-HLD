@@ -4,12 +4,14 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![Tests](https://img.shields.io/badge/Tests-170%20Passed-brightgreen.svg)
-![Performance](https://img.shields.io/badge/Performance-11%2C117%20req%2Fs-orange.svg)
+![Performance](https://img.shields.io/badge/Performance-11%2C138%20req%2Fs-orange.svg)
+![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)
+![AWS](https://img.shields.io/badge/AWS-Deployed-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 **A high-performance, in-memory key-value cache server built with Python asyncio**
 
-[Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Usage](#-usage) • [Performance](#-performance-results) • [Implementation](#-implementation-details)
+[Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Usage](#-usage) • [AWS Deployment](#-aws-deployment) • [Performance](#-performance-results) • [Implementation](#-implementation-details)
 
 </div>
 
@@ -29,6 +31,7 @@
   - [Task 3: TCP Server](#task-3-async-tcp-server)
   - [Task 4: TTL Support](#task-4-ttl-time-to-live)
   - [Task 5: LRU Eviction](#task-5-lru-eviction)
+- [AWS Deployment](#-aws-deployment)
 - [Test Results](#-test-results)
 - [Performance Results](#-performance-results)
 - [Project Structure](#-project-structure)
@@ -46,15 +49,16 @@ This project implements a **Redis-like in-memory key-value cache server** from s
 - **Data Structures**: OrderedDict for O(1) LRU operations
 - **Protocol Design**: Text-based request/response protocol
 - **Cache Systems**: TTL expiration and LRU eviction policies
+- **Cloud Deployment**: Docker containerization & AWS EC2 deployment
 
 ### 🏆 Achievement Summary
 
 | Metric | Target | Achieved | Status |
 |--------|--------|----------|--------|
 | Test Cases | Pass All | **170/170** | ✅ |
-| Throughput | ≥ 5,000 req/s | **11,117 req/s** | ✅ 2.2x |
+| Throughput | ≥ 5,000 req/s | **11,138 req/s** | ✅ 2.2x |
 | Mean Latency | ≤ 10ms | **4.44ms** | ✅ |
-| P99 Latency | ≤ 20ms | **5.93ms** | ✅ |
+| P99 Latency | ≤ 20ms | **6.23ms** | ✅ |
 | Error Rate | 0% | **0%** | ✅ |
 
 ---
@@ -66,6 +70,7 @@ This project implements a **Redis-like in-memory key-value cache server** from s
 - ⏰ **TTL Support**: Automatic key expiration with lazy + active cleanup
 - 📊 **LRU Eviction**: Least Recently Used eviction when cache is full
 - 🐳 **Docker Ready**: Containerized deployment
+- ☁️ **AWS Deployed**: Production-ready cloud deployment
 - 🧪 **Well Tested**: 170 comprehensive test cases
 - 📝 **Simple Protocol**: Human-readable text protocol
 
@@ -104,7 +109,7 @@ This project implements a **Redis-like in-memory key-value cache server** from s
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/AgarwalPragy/kv-cache.git
+git clone https://github.com/Indrajeety993648/kv_store-HLD.git
 cd kv-cache
 
 # 2. Create virtual environment
@@ -462,6 +467,92 @@ class LRUEvictionPolicy:
 
 ---
 
+## ☁️ AWS Deployment
+
+### 🏗️ Deployment Architecture
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/ea1478ba-ef91-41a9-bdb5-c5176a465d6e" />
+
+
+### 📦 Step 1: Build & Push Docker Image
+
+```bash
+# Build the Docker image
+docker build -t kv-cache:latest .
+
+# Test locally first
+docker run -p 7171:7171 kv-cache:latest
+
+# Tag for Docker Hub (replace YOUR_USERNAME)
+docker tag kv-cache:latest YOUR_USERNAME/kv-cache:latest
+
+# Login & Push to Docker Hub
+docker login
+docker push YOUR_USERNAME/kv-cache:latest
+```
+
+### ⚙️ Step 2: Configure AWS
+
+```bash
+# Copy configuration template
+cp scripts/config.sh.example scripts/config.sh
+
+# Edit with your settings
+nano scripts/config.sh
+```
+
+```bash
+# scripts/config.sh
+DOCKER_IMAGE="YOUR_USERNAME/kv-cache:latest"
+AWS_REGION="ap-south-1"
+INSTANCE_TYPE="t3.small"
+```
+
+### 🚀 Step 3: Deploy & Test
+
+```bash
+# Create EC2 instances
+./scripts/aws.sh create
+
+# Deploy Docker container
+./scripts/aws.sh deploy
+
+# Run load test
+./scripts/aws.sh test
+
+# Check results
+cat results/load_test_results.json
+```
+
+### 💰 Step 4: Teardown (CRITICAL!)
+
+```bash
+# Always teardown to avoid AWS charges!
+./scripts/aws.sh teardown
+```
+
+> ⚠️ **Cost Warning**: Two t3.small instances = ~$0.04/hour. **Always teardown when done!**
+
+### 📊 AWS Load Test Results
+
+```
+============================================================
+            AWS LOAD TEST RESULTS - EC2 (t3.small)
+============================================================
+Total Requests:     50,000
+Successful:         50,000 (100.00%)
+Failed:             0 (0.00%)
+------------------------------------------------------------
+Requests/Second:    11,138.38
+Mean Latency:       4.44ms
+P99 Latency:        6.23ms
+------------------------------------------------------------
+✓ All performance targets met on AWS!
+============================================================
+```
+
+---
+
 ## 🧪 Test Results
 
 ### Test Summary
@@ -516,44 +607,67 @@ Total Requests:     50,000
 Successful:         50,000 (100.00%)
 Failed:             0 (0.00%)
 ------------------------------------------------------------
-Total Time:         4.50 seconds
-Requests/Second:    11,117.09
+Total Time:         4.49 seconds
+Requests/Second:    11,138.38
 Latency (ms):
-  Min:              2.05
-  Max:              15.81
+  Min:              2.83
+  Max:              9.96
   Mean:             4.44
-  Median:           4.40
-  P95:              5.37
-  P99:              5.93
+  Median:           4.41
+  P95:              5.43
+  P99:              6.23
 Operations:
-  PUT:              25,141 (success: 25,141)
-  GET:              24,859 (success: 24,859)
-  Cache Hits:       15,108 (60.77%)
-  Cache Misses:     9,751
+  PUT:              25,057 (success: 25,057)
+  GET:              24,943 (success: 24,943)
+  Cache Hits:       15,560 (62.38%)
+  Cache Misses:     9,383
 ============================================================
 Performance Assessment:
-  ✓ Throughput: 11117 req/s (target: ≥5,000)
+  ✓ Throughput: 11138 req/s (target: ≥5,000)
   ✓ Mean latency: 4.44ms (target: ≤10ms)
-  ✓ P99 latency: 5.93ms (target: ≤20ms)
+  ✓ P99 latency: 6.23ms (target: ≤20ms)
   ✓ Error rate: 0.00% (target: 0%)
   🎉 All performance targets met!
+============================================================
 ```
 
-### Performance Visualization
+### 📈 Performance Scorecard
 
 ```
-    Throughput: 11,117 req/s
-    ████████████████████████████████████████████░░░░░░░░ 222% of target
-
-    Mean Latency: 4.44ms  
-    ████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 44% of limit ✓
-
-    P99 Latency: 5.93ms
-    ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30% of limit ✓
-
-    Error Rate: 0.00%
-    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ Perfect ✓
+┌────────────────────────────────────────────────────────────────┐
+│                 🏆 PERFORMANCE SCORECARD                       │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  THROUGHPUT                                                    │
+│  Target: 5,000 req/s    Achieved: 11,138 req/s                │
+│  ████████████████████████████████████████████░░░░░░  222% ✓   │
+│                                                                │
+│  MEAN LATENCY                                                  │
+│  Target: ≤10ms          Achieved: 4.44ms                       │
+│  ████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   44% ✓   │
+│                                                                │
+│  P99 LATENCY                                                   │
+│  Target: ≤20ms          Achieved: 6.23ms                       │
+│  ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   31% ✓   │
+│                                                                │
+│  ERROR RATE                                                    │
+│  Target: 0%             Achieved: 0.00%                        │
+│  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0%  ✓   │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│              🎉 ALL PERFORMANCE TARGETS MET!                   │
+└────────────────────────────────────────────────────────────────┘
 ```
+
+### Performance Metrics Summary
+
+| Metric | Target | Achieved | Margin |
+|--------|--------|----------|--------|
+| **Throughput** | ≥ 5,000 req/s | 11,138 req/s | **+122%** |
+| **Mean Latency** | ≤ 10ms | 4.44ms | **56% headroom** |
+| **P99 Latency** | ≤ 20ms | 6.23ms | **69% headroom** |
+| **Error Rate** | 0% | 0.00% | **Perfect** |
+| **Success Rate** | 100% | 100% | **50,000/50,000** |
 
 ---
 
@@ -588,8 +702,12 @@ kv-cache/
 │   └── test_integration.py    # Integration tests
 ├── scripts/
 │   ├── client.py              # Interactive client
-│   └── load_test.py           # Performance testing
-├── Dockerfile
+│   ├── load_test.py           # Performance testing
+│   ├── config.sh              # AWS configuration
+│   └── aws.sh                 # AWS deployment script
+├── results/
+│   └── load_test_results.json # 📊 Load test results
+├── Dockerfile                 # 🐳 Docker configuration
 ├── requirements.txt
 ├── setup.py
 ├── pytest.ini
@@ -656,6 +774,12 @@ kv-cache/
 2. **Separation of Concerns**: Network, Protocol, Storage layers
 3. **Performance Testing**: Load testing, latency measurement
 
+### Cloud & DevOps
+
+1. **Docker Containerization**: Building production-ready images
+2. **AWS EC2 Deployment**: Cloud infrastructure management
+3. **Load Testing**: Validating performance under real-world conditions
+
 ---
 
 ## 🔗 References
@@ -664,13 +788,16 @@ kv-cache/
 - [Redis Protocol Specification](https://redis.io/docs/reference/protocol-spec/)
 - [LRU Cache - Wikipedia](https://en.wikipedia.org/wiki/Cache_replacement_policies#LRU)
 - [OrderedDict Documentation](https://docs.python.org/3/library/collections.html#collections.OrderedDict)
+- [Docker Documentation](https://docs.docker.com/)
+- [AWS EC2 User Guide](https://docs.aws.amazon.com/ec2/)
 
 ---
 
 ## 👨‍💻 Author
 
-Indrajeet Yadav  
-HLD-101 Course Assignment
+**Indrajeet Yadav**  
+HLD-101 Course Assignment  
+January 2026
 
 ---
 
@@ -679,6 +806,14 @@ HLD-101 Course Assignment
 *"There are only two hard things in Computer Science: cache invalidation and naming things."*  
 — **Phil Karlton**
 
-*This project tackles one of them.* 🚀
+---
+
+**This project tackles one of them — with 11,138 requests per second.** 🚀
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Built with 💻 Python | 🐳 Docker | ☁️ AWS**
+
+**170 Tests ✅ | 11,138 req/s ⚡ | 0% Errors 🎯**
 
 </div>
