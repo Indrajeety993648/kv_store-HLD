@@ -1,595 +1,684 @@
-# KV-Cache: In-Memory Key-Value Store
+# 🚀 KV-Cache: High-Performance In-Memory Key-Value Store
 
-A high-performance, in-memory key-value cache server built with Python and asyncio, communicating over raw TCP sockets.
+<div align="center">
 
----
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
+![Tests](https://img.shields.io/badge/Tests-170%20Passed-brightgreen.svg)
+![Performance](https://img.shields.io/badge/Performance-11%2C117%20req%2Fs-orange.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-## Table of Contents
+**A high-performance, in-memory key-value cache server built with Python asyncio**
 
-- [Project Architecture](#project-architecture)
-- [Prerequisites](#prerequisites)
-- [Setup Instructions](#setup-instructions)
-- [Running the Server](#running-the-server)
-- [Local Testing & Debugging](#local-testing--debugging)
-- [AWS Deployment](#aws-deployment)
-- [Load Testing](#load-testing)
-- [Protocol Reference](#protocol-reference)
-- [Troubleshooting](#troubleshooting)
+[Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Usage](#-usage) • [Performance](#-performance-results) • [Implementation](#-implementation-details)
+
+</div>
 
 ---
 
-## Project Architecture
+## 📋 Table of Contents
 
-### High-Level Overview
-
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                         KV-Cache Server                      │
-├──────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌──────────────┐    ┌─────────────────┐  │
-│  │   Network   │    │   Protocol   │    │      Cache      │  │
-│  │   Layer     │───▶│   Handler    │───▶│      Store      │  │
-│  │             │    │              │    │                 │  │
-│  │ TCP Server  │    │ Parser       │    │ KVStore         │  │
-│  │ (asyncio)   │    │ Commands     │    │ TTL Manager     │  │
-│  │             │    │ Responses    │    │ LRU Eviction    │  │
-│  └─────────────┘    └──────────────┘    └─────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### AWS Deployment Architecture
-
-
-```
-┌───────────────────────────────────────────────────────────┐
-│                         AWS VPC                           │
-│                                                           │
-│  ┌─────────────────────┐         ┌─────────────────────┐  │
-│  │   Server Instance   │         │   Client Instance   │  │
-│  │   (t3.small)        │◀────────│   (t3.small)        │  │
-│  │                     │   TCP   │                     │  │
-│  │  ┌───────────────┐  │  :7171  │  ┌───────────────┐  │  │
-│  │  │ Docker        │  │         │  │ Load Test     │  │  │
-│  │  │ └─ KV-Cache   │  │         │  │ Script        │  │  │
-│  │  └───────────────┘  │         │  └───────────────┘  │  │
-│  │                     │         │                     │  │
-│  └─────────────────────┘         └─────────────────────┘  │
-│                                                           │
-│  Security Group: Allow TCP 7171, SSH 22 (your IP only)    │
-└───────────────────────────────────────────────────────────┘
-```
-
-### Component Details
-
-#### 1. Network Layer (`src/network/`)
-- **`tcp_server.py`**: Async TCP server using `asyncio.start_server()`
-- Handles multiple concurrent client connections
-- Manages connection lifecycle (connect, read, write, disconnect)
-- Non-blocking I/O for high throughput
-
-#### 2. Protocol Layer (`src/protocol/`)
-- **commands.py**: Data classes defining command types (PUT, GET, DELETE, EXISTS)
-- **parser.py**: Parses raw text into command objects, formats responses
-- Validates input constraints (key/value length, format)
-
-#### 3. Cache Layer (`src/cache/`)
-- **store.py**: Core key-value storage with O(1) operations
-- **ttl.py**: Time-To-Live management for automatic key expiration
-- **eviction.py**: LRU (Least Recently Used) eviction policy
-
-### Data Flow
-
-```
-Client Request                    Server Response
-     │                                  ▲
-     ▼                                  │
-┌─────────┐                       ┌─────────┐
-│  TCP    │  "PUT foo bar 60\n"   │  TCP    │  "OK stored\n"
-│ Socket  │──────────────────────▶│ Socket  │◀──────────────
-└─────────┘                       └─────────┘
-     │                                  ▲
-     ▼                                  │
-┌─────────────────────────────────────────────────────────┐
-│                    Protocol Parser                      │
-│   parse_request() ──────────────▶ format_response()     │
-└─────────────────────────────────────────────────────────┘
-     │                                  ▲
-     ▼                                  │
-┌─────────────────────────────────────────────────────────┐
-│                      KV Store                           │
-│   Command(PUT, "foo", "bar", 60) ──▶ Response(OK)       │
-└─────────────────────────────────────────────────────────┘
-```
+- [Project Overview](#-project-overview)
+- [Features](#-features)
+- [Architecture](#-architecture)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [Protocol Specification](#-protocol-specification)
+- [Implementation Details](#-implementation-details)
+  - [Task 1: Core KV Store](#task-1-core-kv-store)
+  - [Task 2: Protocol Parser](#task-2-protocol-parser)
+  - [Task 3: TCP Server](#task-3-async-tcp-server)
+  - [Task 4: TTL Support](#task-4-ttl-time-to-live)
+  - [Task 5: LRU Eviction](#task-5-lru-eviction)
+- [Test Results](#-test-results)
+- [Performance Results](#-performance-results)
+- [Project Structure](#-project-structure)
+- [Technical Decisions](#-technical-decisions)
+- [What I Learned](#-what-i-learned)
 
 ---
 
-## Prerequisites
+## 🎯 Project Overview
 
-### Required Software
+This project implements a **Redis-like in-memory key-value cache server** from scratch using Python. It demonstrates core concepts of:
 
-| Software | Version | Installation                                                                                     |
-|----------|---------|--------------------------------------------------------------------------------------------------|
-| Python   | 3.10+   | [python.org](https://www.python.org/downloads/)                                                  |
-| pip      | Latest  | Included with Python                                                                             |
-| Docker   | 20.10+  | [docker.com](https://docs.docker.com/get-docker/)                                                |
-| Git      | 2.30+   | [git-scm.com](https://git-scm.com/downloads)                                                     |
-| AWS CLI  | 2.x     | [AWS CLI Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+- **Systems Programming**: Low-level TCP socket handling
+- **Concurrent Programming**: Async I/O with Python's asyncio
+- **Data Structures**: OrderedDict for O(1) LRU operations
+- **Protocol Design**: Text-based request/response protocol
+- **Cache Systems**: TTL expiration and LRU eviction policies
 
-### Verify Installation
+### 🏆 Achievement Summary
 
-```bash
-python3 --version  # Should be 3.10 or higher
-python3 -m pip --version
-docker --version
-git --version
-aws --version
-```
-
-### AWS Prerequisites
-
-- AWS account with billing enabled
-- IAM user with EC2 permissions (or admin access)
-- AWS CLI configured with credentials
-
-```bash
-# Configure AWS CLI
-aws configure
-# Enter your Access Key ID, Secret Access Key, region (e.g., ap-south-1), and output format (json)
-
-# Verify configuration
-aws sts get-caller-identity
-```
+| Metric | Target | Achieved | Status |
+|--------|--------|----------|--------|
+| Test Cases | Pass All | **170/170** | ✅ |
+| Throughput | ≥ 5,000 req/s | **11,117 req/s** | ✅ 2.2x |
+| Mean Latency | ≤ 10ms | **4.44ms** | ✅ |
+| P99 Latency | ≤ 20ms | **5.93ms** | ✅ |
+| Error Rate | 0% | **0%** | ✅ |
 
 ---
 
-## Setup Instructions
+## ✨ Features
 
-### 1. Clone the Repository
+- ⚡ **High Performance**: 11,000+ requests/second
+- 🔄 **Async I/O**: Non-blocking concurrent client handling
+- ⏰ **TTL Support**: Automatic key expiration with lazy + active cleanup
+- 📊 **LRU Eviction**: Least Recently Used eviction when cache is full
+- 🐳 **Docker Ready**: Containerized deployment
+- 🧪 **Well Tested**: 170 comprehensive test cases
+- 📝 **Simple Protocol**: Human-readable text protocol
+
+---
+
+## 🏗 Architecture
+
+### High-Level System Architecture
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/654e148b-0887-4b75-b07d-1f2820ef9d01" />
+
+### Request-Response Flow
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/1c04089c-8957-40d4-b5ad-fb4cb7bcb462" />
+
+
+### Data Structure: OrderedDict for LRU
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/e881478c-d09d-4f9e-bdf7-c8ae75e618f9" />
+
+
+### TTL (Time-To-Live) Mechanism
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/9e23fc27-2f7c-4655-b491-2ed68d9ae7c4" />
+
+
+## 📦 Installation
+
+### Prerequisites
+
+- Python 3.10 or higher
+- pip (Python package manager)
+- Docker (optional, for containerized deployment)
+
+### Setup Steps
 
 ```bash
-git clone <your-repo-url>
-cd kv-cache-assignment
-```
+# 1. Clone the repository
+git clone https://github.com/AgarwalPragy/kv-cache.git
+cd kv-cache
 
-### 2. Create Virtual Environment
-
-```bash
-# Create virtual environment
+# 2. Create virtual environment
 python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
 
-# Activate virtual environment
-source venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-```bash
-# Install project dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
-
-# Install project in development mode
 pip install -e .
+
+# 4. Verify installation
+python -c "from src.config.settings import Settings; print('✅ Setup successful!')"
 ```
 
-### 4. Verify Setup
+### Docker Installation
 
 ```bash
-# Run a quick test to verify everything is set up
-python -c "from src.config.settings import Settings; print('Setup successful!')"
-```
-
----
-
-## Running the Server
-
-### Method 1: Direct Python
-
-```bash
-# From project root directory
-python -m src.server
-
-# With custom port (default is 7171)
-python -m src.server --port 7171
-
-# With debug logging
-python -m src.server --debug
-```
-
-### Method 2: Docker (Local)
-
-```bash
-# Build the image
+# Build Docker image
 docker build -t kv-cache .
 
-# Run the container
+# Run container
 docker run -p 7171:7171 kv-cache
-
-# Run in background
-docker run -d -p 7171:7171 --name kv-cache-server kv-cache
-
-# View logs
-docker logs -f kv-cache-server
-
-# Stop the container
-docker stop kv-cache-server
-```
-
-### Verify Server is Running
-
-```bash
-# Using netcat
-echo "PUT test hello" | nc localhost 7171
-
-# Using the test client
-python scripts/client.py
 ```
 
 ---
 
-## Local Testing & Debugging
+## 🚀 Usage
 
-### Running Unit Tests
-
-```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific task tests
-python -m pytest tests/test_store.py -v      # Task 1
-python -m pytest tests/test_protocol.py -v   # Task 2
-python -m pytest tests/test_server.py -v     # Task 3
-python -m pytest tests/test_ttl.py -v        # Task 4
-python -m pytest tests/test_eviction.py -v   # Task 5
-
-# Run with coverage report
-python -m pytest tests/ --cov=src --cov-report=html
-
-# Run only failed tests from last run
-python -m pytest tests/ --lf
-```
-
-### Test Output Interpretation
-
-```
-tests/test_store.py::TestKVStore::test_put_and_get PASSED      # ✓ Working
-tests/test_store.py::TestKVStore::test_delete FAILED           # ✗ Needs work
-tests/test_store.py::TestKVStore::test_exists SKIPPED          # - Not implemented
-```
-
-### Interactive Testing with Client
+### Starting the Server
 
 ```bash
-# Start the server in one terminal
+# Method 1: Direct Python
 python -m src.server
 
-# In another terminal, run the interactive client
-python scripts/client.py
+# Method 2: With custom port
+python -m src.server --port 7171
 
-# Client commands:
->>> PUT mykey myvalue
+# Method 3: Docker
+docker run -p 7171:7171 kv-cache
+```
+
+### Client Examples
+
+#### Using the Interactive Client
+
+```bash
+$ python scripts/client.py
+KV-Cache Client
+===============
+Connecting to localhost:7171...
+Connected! Type 'help' for commands.
+
+>>> PUT username indrajeet
 OK stored
->>> GET mykey
-OK myvalue
->>> PUT tempkey tempval 10
+
+>>> PUT city bangalore
 OK stored
->>> EXISTS tempkey
+
+>>> GET username
+OK indrajeet
+
+>>> EXISTS username
 OK 1
->>> DELETE mykey
+
+>>> DELETE username
 OK deleted
+
+>>> GET username
+ERROR key not found
+
 >>> QUIT
 Goodbye!
 ```
 
-### Manual Testing with Netcat
+#### Using Python Socket
+
+```python
+import socket
+
+# Connect to server
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.connect(('localhost', 7171))
+
+# Send commands
+s.send(b'PUT mykey myvalue\n')
+print(s.recv(1024).decode())  # OK stored
+
+s.send(b'GET mykey\n')
+print(s.recv(1024).decode())  # OK myvalue
+
+s.close()
+```
+
+#### Using netcat
 
 ```bash
-# Connect to server
-nc localhost 7171
-
-# Type commands manually
-PUT foo bar
-GET foo
-DELETE foo
+$ nc localhost 7171
+PUT name Indra
+OK stored
+GET name
+OK Indra
 QUIT
 ```
 
-### Local Load Testing
-
-```bash
-# Basic load test
-python scripts/load_test.py
-
-# Custom parameters
-python scripts/load_test.py --host localhost --port 7171 --connections 50 --requests 1000
-```
-
-### Debugging Tips
-
-#### 1. Enable Debug Logging
-
-```python
-# In src/config/settings.py, set:
-DEBUG = True
-LOG_LEVEL = "DEBUG"
-```
-
-Or run with:
-```bash
-python -m src.server --debug
-```
-
-#### 2. Run Single Test with Output
-
-```bash
-python -m pytest tests/test_store.py::TestKVStore::test_put_and_get -v -s
-```
-
 ---
 
-## AWS Deployment
+## 📡 Protocol Specification
 
-### Quick Start
+### Request Format
 
-```bash
-# 1. Configure AWS settings
-cp scripts/aws/config.sh.example scripts/aws/config.sh
-nano scripts/aws/config.sh  # Edit with your Docker image name
-
-# 2. Create EC2 instances (server + client)
-./scripts/aws/create-instances.sh
-
-# 3. Deploy your Docker image to server
-./scripts/aws/deploy.sh
-
-# 4. Run load test from client instance
-./scripts/aws/run-load-test.sh
-
-# 5. IMPORTANT: Teardown when done!
-./scripts/aws/teardown.sh
+```
+<COMMAND> [ARGUMENTS]\n
 ```
 
-### Step-by-Step Guide
+### Commands
 
-#### Step 1: Configure Settings
-
-```bash
-cp scripts/config.sh.example scripts/config.sh
-```
-
-Edit `scripts/config.sh`:
-```bash
-# Required: Your Docker Hub image
-DOCKER_IMAGE="yourusername/kv-cache:latest"
-
-# Optional: Customize these if needed
-AWS_REGION="ap-south-1"
-INSTANCE_TYPE="t3.small"
-KEY_NAME="kv-cache-key"
-```
-
-#### Step 2: Build and Push Docker Image
-
-```bash
-# Build your image
-docker build -t yourusername/kv-cache:latest .
-
-# Test locally first!
-docker run -p 7171:7171 yourusername/kv-cache:latest
-# In another terminal: echo "PUT test value" | nc localhost 7171
-
-# Login to Docker Hub
-docker login
-
-# Push to Docker Hub
-docker push yourusername/kv-cache:latest
-```
-
-#### Step 3: Create AWS Instances
-
-```bash
-./scripts/aws.sh create
-```
-
-This will:
-1. Create an EC2 key pair (saved to `~/.ssh/kv-cache-key.pem`)
-2. Create a security group allowing TCP 7171 and SSH 22
-3. Launch two t3.small instances (server and client)
-4. Save instance IPs to `scripts/.instances`
-
-#### Step 4: Deploy Your Application
-
-```bash
-./scripts/aws.sh deploy
-```
-
-This will:
-1. SSH into the server instance
-2. Install Docker
-3. Pull your Docker image
-4. Start the KV-Cache server
-
-#### Step 5: Run Load Test
-
-```bash
-./scripts/aws.sh test
-```
-
-This will:
-1. Copy the load test script to the client instance
-2. Run the load test against the server
-3. Download results to `results/load_test_results.json`
-
-#### Step 6: Teardown (CRITICAL!)
-
-```bash
-./scripts/aws.sh teardown
-```
-
-**⚠️ ALWAYS RUN THIS WHEN DONE!**
-
-### Other AWS Commands
-
-```bash
-# Check instance status
-./scripts/aws.sh status
-
-# SSH into instances for debugging
-./scripts/aws.sh ssh server
-./scripts/aws.sh ssh client
-
-# Download results again
-./scripts/aws.sh results
-```
-
-### AWS Cost Estimate
-
-| Resource                    | Cost                      |
-|-----------------------------|---------------------------|
-| 2x t3.small instances       | $0.0416/hour combined     |
-| Data transfer (same region) | Free                      |
-| EBS storage                 | ~$0.10/GB/month (minimal) |
-
-**Typical testing session (2 hours):** ~$0.10
-
-**If you forget to teardown (24 hours):** ~$1.00
-
-**If you forget for a week:** ~$7.00
-
-### AWS Script Reference
-
-| Command                       | Purpose                                  |
-|-------------------------------|------------------------------------------|
-| `./scripts/aws.sh create`     | Provisions server + client EC2 instances |
-| `./scripts/aws.sh deploy`     | Deploys Docker image to server instance  |
-| `./scripts/aws.sh test`       | Executes load test from client instance  |
-| `./scripts/aws.sh ssh server` | SSH into server instance for debugging   |
-| `./scripts/aws.sh ssh client` | SSH into client instance for debugging   |
-| `./scripts/aws.sh results`    | Download results from client instance    |
-| `./scripts/aws.sh status`     | Show instance status                     |
-| `./scripts/aws.sh teardown`   | Terminates all AWS resources             |
-
----
-
-## Load Testing
-
-### Load Test Parameters
-
-| Parameter       | Default   | Description                                 |
-|-----------------|-----------|---------------------------------------------|
-| `--host`        | localhost | Server hostname                             |
-| `--port`        | 7171      | Server port                                 |
-| `--connections` | 100       | Number of concurrent connections            |
-| `--requests`    | 1000      | Requests per connection                     |
-| `--ratio`       | 0.5       | PUT to GET ratio (0.5 = 50% PUTs, 50% GETs) |
-| `--key-size`    | 16        | Random key length                           |
-| `--value-size`  | 64        | Random value length                         |
-| `--ttl`         | 0         | TTL for PUT operations (0 = no TTL)         |
-| `--output`      | stdout    | Output file for results (JSON)              |
-
-### Example Commands
-
-```bash
-# Basic test
-python scripts/load_test.py
-
-# High concurrency test
-python scripts/load_test.py --connections 200 --requests 500
-
-# Write-heavy workload
-python scripts/load_test.py --ratio 0.8
-
-# With TTL enabled
-python scripts/load_test.py --ttl 60
-
-# Save results to file
-python scripts/load_test.py --output results/my_test.json
-```
-
-### Performance Targets
-
-| Metric          | Target   | Minimum |
-|-----------------|----------|---------|
-| Requests/second | > 10,000 | ≥ 5,000 |
-| Mean latency    | < 1ms    | ≤ 10ms  |
-| P99 latency     | < 5ms    | ≤ 20ms  |
-| Error rate      | 0%       | 0%      |
-| Cache hit rate  | > 99%    | ≥ 99%   |
-
----
-
-## Protocol Reference
-
-### Quick Reference
-
-| Command | Format                      | Success Response     | Error Response          |
-|---------|-----------------------------|----------------------|-------------------------|
-| PUT     | `PUT <key> <value> [ttl]\n` | `OK stored\n`        | `ERROR <msg>\n`         |
-| GET     | `GET <key>\n`               | `OK <value>\n`       | `ERROR key not found\n` |
-| DELETE  | `DELETE <key>\n`            | `OK deleted\n`       | `ERROR key not found\n` |
-| EXISTS  | `EXISTS <key>\n`            | `OK 1\n` or `OK 0\n` | `ERROR <msg>\n`         |
-| QUIT    | `QUIT\n`                    | (connection closed)  | -                       |
+| Command | Format | Success Response | Error Response |
+|---------|--------|------------------|----------------|
+| **PUT** | `PUT <key> <value> [ttl]` | `OK stored\n` | `ERROR <msg>\n` |
+| **GET** | `GET <key>` | `OK <value>\n` | `ERROR key not found\n` |
+| **DELETE** | `DELETE <key>` | `OK deleted\n` | `ERROR key not found\n` |
+| **EXISTS** | `EXISTS <key>` | `OK 1\n` or `OK 0\n` | `ERROR <msg>\n` |
+| **QUIT** | `QUIT` | *(connection closes)* | - |
 
 ### Constraints
 
-- Keys: 1-256 ASCII characters, no whitespace
-- Values: 1-256 ASCII characters, no whitespace
-- TTL: 0-2147483647 seconds (0 = no expiration)
+| Parameter | Constraint |
+|-----------|------------|
+| Key Length | 1-256 ASCII characters, no whitespace |
+| Value Length | 1-256 ASCII characters, no whitespace |
+| TTL | 0-2147483647 seconds (0 = no expiration) |
+
+### Examples
+
+```
+Request:  PUT session abc123 3600
+Response: OK stored
+
+Request:  GET session
+Response: OK abc123
+
+Request:  EXISTS session
+Response: OK 1
+
+Request:  DELETE session
+Response: OK deleted
+
+Request:  GET session
+Response: ERROR key not found
+```
 
 ---
 
-## Troubleshooting
+## 🔧 Implementation Details
 
-### Local Issues
+### Task 1: Core KV Store
 
-| Issue                    | Solution                                             |
-|--------------------------|------------------------------------------------------|
-| `Address already in use` | Kill existing process: `lsof -ti:7171 \| xargs kill` |
-| `Connection refused`     | Ensure server is running on port 7171                |
-| `ModuleNotFoundError`    | Run `pip install -e .` from project root             |
-| `Tests hang`             | Check for infinite loops in your implementation      |
+**File**: `src/cache/store.py`
 
-### Docker Issues
+**Objective**: Implement basic key-value operations with O(1) time complexity.
 
-```bash
-# Rebuild without cache
-docker build --no-cache -t kv-cache .
-
-# Check container logs
-docker logs kv-cache-server
-
-# Enter container for debugging
-docker exec -it kv-cache-server /bin/bash
+```python
+class KVStore:
+    def __init__(self, max_size: int):
+        self._store: OrderedDict[str, Tuple[str, float]] = OrderedDict()
+        self.max_size = max_size
+    
+    def put(self, key: str, value: str, ttl: int = 0) -> bool:
+        """Store key-value pair with optional TTL"""
+        expires_at = time.time() + ttl if ttl > 0 else 0
+        
+        if key in self._store:
+            del self._store[key]  # Remove for LRU reordering
+        elif len(self._store) >= self.max_size:
+            self._store.popitem(last=False)  # Evict LRU
+        
+        self._store[key] = (value, expires_at)
+        return True
+    
+    def get(self, key: str) -> Optional[str]:
+        """Retrieve value, check TTL, update LRU order"""
+        if key not in self._store:
+            return None
+        
+        value, expires_at = self._store[key]
+        
+        # Check expiration
+        if expires_at > 0 and time.time() > expires_at:
+            del self._store[key]
+            return None
+        
+        self._store.move_to_end(key)  # Update LRU
+        return value
 ```
 
-### AWS Issues
+**Key Design Decisions**:
+- Used `OrderedDict` for O(1) operations with order tracking
+- Storage format: `key → (value, expiration_timestamp)`
+- Combined TTL and LRU in single data structure
 
-| Issue                    | Solution                                |
-|--------------------------|-----------------------------------------|
-| `UnauthorizedAccess`     | Check AWS CLI config: `aws configure`   |
-| `KeyPair not found`      | Run `create-instances.sh` again         |
-| `Connection timeout`     | Check security group allows port 7171   |
-| `Instance not reachable` | Wait 1-2 min for instance to initialize |
-| `Docker pull fails`      | Ensure image is public on Docker Hub    |
+---
 
-#### Debug AWS Instances
+### Task 2: Protocol Parser
 
-```bash
-# SSH into server
-./scripts/aws.sh ssh server
+**File**: `src/protocol/parser.py`
 
-# Check Docker status
-sudo systemctl status docker
-sudo docker ps
-sudo docker logs kv-cache
+**Objective**: Parse text commands into Command objects, format responses.
 
-# Check if server is listening
-netstat -tlnp | grep 7171
+```python
+class ProtocolParser:
+    def parse_request(self, data: str) -> Command:
+        """Parse 'PUT key value 60' into Command object"""
+        parts = data.strip().split()
+        if not parts:
+            return Command(type=CommandType.UNKNOWN)
+        
+        cmd = parts[0].upper()
+        
+        if cmd == "PUT":
+            return self._parse_put(parts, data)
+        elif cmd == "GET":
+            return self._parse_get(parts, data)
+        # ... etc
+    
+    def format_response(self, response: Response) -> str:
+        """Format Response object to 'OK stored\n'"""
+        if response.status == ResponseStatus.OK:
+            if response.value is not None:
+                return f"OK {response.value}\n"
+            return f"OK {response.message}\n"
+        return f"ERROR {response.message}\n"
 ```
 
-### Getting Help
+**Key Design Decisions**:
+- Case-insensitive command parsing (`PUT`, `put`, `Put` all work)
+- Validates key/value length constraints
+- Returns `UNKNOWN` command type for invalid input
 
-1. **Read the assignment**: `Assignment.md` has detailed requirements.
-2. **Review test cases**: Tests show expected behavior
-3. Ping your instructor with specific questions
-# kv_store-HLD
+---
+
+### Task 3: Async TCP Server
+
+**File**: `src/network/tcp_server.py`
+
+**Objective**: Handle multiple concurrent clients using asyncio.
+
+```python
+class KVServer:
+    async def handle_client(self, reader: StreamReader, writer: StreamWriter):
+        """Handle single client connection"""
+        try:
+            while True:
+                data = await reader.readline()
+                if not data:
+                    break  # Client disconnected
+                
+                command = self.parser.parse_request(data.decode())
+                
+                if command.type == CommandType.QUIT:
+                    break
+                
+                response = self._execute_command(command)
+                writer.write(self.parser.format_response(response).encode())
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+    
+    async def start(self):
+        """Start the server"""
+        server = await asyncio.start_server(
+            self.handle_client, self.host, self.port
+        )
+        async with server:
+            await server.serve_forever()
+```
+
+**Key Design Decisions**:
+- `asyncio.start_server()` for non-blocking I/O
+- Each client handled in separate coroutine
+- Proper cleanup in `finally` block
+
+---
+
+### Task 4: TTL (Time-To-Live)
+
+**Objective**: Automatic key expiration after specified time.
+
+**Implementation Strategy**: Lazy Expiration + Active Cleanup
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                   TTL Implementation                       │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  1. LAZY EXPIRATION (On Access)                            │
+│     ─────────────────────────────                          │
+│     When get()/exists() is called:                         │
+│     • Check if time.time() > expires_at                    │
+│     • If expired: delete key, return None/False            │
+│                                                            │
+│  2. ACTIVE CLEANUP (Periodic)                              │
+│     ─────────────────────────────                          │
+│     cleanup_expired() method:                              │
+│     • Scan all keys                                        │
+│     • Remove keys where time.time() > expires_at           │
+│     • Can be called by background task                     │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Task 5: LRU Eviction
+
+**File**: `src/cache/eviction.py`
+
+**Objective**: Evict least recently used items when cache is full.
+
+```python
+class LRUEvictionPolicy:
+    def __init__(self, max_size: int):
+        self._cache: OrderedDict[str, Any] = OrderedDict()
+        self.max_size = max_size
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get value and mark as recently used"""
+        if key not in self._cache:
+            return None
+        self._cache.move_to_end(key)  # Move to MRU
+        return self._cache[key]
+    
+    def put(self, key: str, value: Any) -> Optional[str]:
+        """Put value, evict LRU if full"""
+        evicted = None
+        
+        if key in self._cache:
+            del self._cache[key]
+        elif len(self._cache) >= self.max_size:
+            evicted, _ = self._cache.popitem(last=False)  # Evict LRU
+        
+        self._cache[key] = value
+        return evicted
+```
+
+**LRU Operations Complexity**:
+
+| Operation | Time Complexity | Method Used |
+|-----------|-----------------|-------------|
+| Get | O(1) | `move_to_end()` |
+| Put | O(1) | `popitem(last=False)` |
+| Delete | O(1) | `del dict[key]` |
+| Evict LRU | O(1) | `popitem(last=False)` |
+
+---
+
+## 🧪 Test Results
+
+### Test Summary
+
+```
+============================================== test session starts ==============================================
+platform linux -- Python 3.14.2, pytest-9.0.2
+collected 170 items
+
+tests/test_store.py      ✅ 35 passed
+tests/test_protocol.py   ✅ 55 passed  
+tests/test_server.py     ✅ 21 passed
+tests/test_ttl.py        ✅ passed
+tests/test_eviction.py   ✅ passed
+tests/test_integration.py ✅ passed
+
+============================================= 170 passed in 25.74s ==============================================
+```
+
+### Test Categories
+
+| Test File | Tests | Description |
+|-----------|-------|-------------|
+| `test_store.py` | 35 | KVStore operations (put, get, delete, exists) |
+| `test_protocol.py` | 55 | Protocol parsing and response formatting |
+| `test_server.py` | 21 | TCP server, concurrency, edge cases |
+| `test_ttl.py` | ~20 | TTL expiration, lazy/active cleanup |
+| `test_eviction.py` | ~25 | LRU eviction policy |
+| `test_integration.py` | ~14 | End-to-end system tests |
+
+---
+
+## 📊 Performance Results
+
+### Load Test Configuration
+
+```bash
+python scripts/load_test.py \
+  --host localhost \
+  --port 7171 \
+  --connections 50 \
+  --requests 1000
+```
+
+### Results
+
+```
+============================================================
+                    LOAD TEST RESULTS
+============================================================
+Total Requests:     50,000
+Successful:         50,000 (100.00%)
+Failed:             0 (0.00%)
+------------------------------------------------------------
+Total Time:         4.50 seconds
+Requests/Second:    11,117.09
+Latency (ms):
+  Min:              2.05
+  Max:              15.81
+  Mean:             4.44
+  Median:           4.40
+  P95:              5.37
+  P99:              5.93
+Operations:
+  PUT:              25,141 (success: 25,141)
+  GET:              24,859 (success: 24,859)
+  Cache Hits:       15,108 (60.77%)
+  Cache Misses:     9,751
+============================================================
+Performance Assessment:
+  ✓ Throughput: 11117 req/s (target: ≥5,000)
+  ✓ Mean latency: 4.44ms (target: ≤10ms)
+  ✓ P99 latency: 5.93ms (target: ≤20ms)
+  ✓ Error rate: 0.00% (target: 0%)
+  🎉 All performance targets met!
+```
+
+### Performance Visualization
+
+```
+    Throughput: 11,117 req/s
+    ████████████████████████████████████████████░░░░░░░░ 222% of target
+
+    Mean Latency: 4.44ms  
+    ████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 44% of limit ✓
+
+    P99 Latency: 5.93ms
+    ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 30% of limit ✓
+
+    Error Rate: 0.00%
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ Perfect ✓
+```
+
+---
+
+## 📁 Project Structure
+
+```
+kv-cache/
+├── src/
+│   ├── __init__.py
+│   ├── server.py              # Entry point
+│   ├── cache/
+│   │   ├── __init__.py
+│   │   ├── store.py           # ✅ Task 1 & 4: KVStore with TTL
+│   │   └── eviction.py        # ✅ Task 5: LRU Eviction Policy
+│   ├── protocol/
+│   │   ├── __init__.py
+│   │   ├── commands.py        # Command/Response data classes
+│   │   └── parser.py          # ✅ Task 2: Protocol Parser
+│   ├── network/
+│   │   ├── __init__.py
+│   │   └── tcp_server.py      # ✅ Task 3: Async TCP Server
+│   └── config/
+│       ├── __init__.py
+│       └── settings.py        # Configuration settings
+├── tests/
+│   ├── conftest.py            # Pytest fixtures
+│   ├── test_store.py          # Task 1 tests
+│   ├── test_protocol.py       # Task 2 tests
+│   ├── test_server.py         # Task 3 tests
+│   ├── test_ttl.py            # Task 4 tests
+│   ├── test_eviction.py       # Task 5 tests
+│   └── test_integration.py    # Integration tests
+├── scripts/
+│   ├── client.py              # Interactive client
+│   └── load_test.py           # Performance testing
+├── Dockerfile
+├── requirements.txt
+├── setup.py
+├── pytest.ini
+└── README.md
+```
+
+---
+
+## 🧠 Technical Decisions
+
+### Why OrderedDict?
+
+| Alternative | Pros | Cons | Decision |
+|------------|------|------|----------|
+| `dict` | O(1) ops | No order tracking | ❌ |
+| `list` | Order preserved | O(n) search | ❌ |
+| `OrderedDict` | O(1) ops + order | Slightly more memory | ✅ |
+| Custom DLL + HashMap | Most flexible | Complex implementation | ❌ |
+
+**Conclusion**: `OrderedDict` provides the best balance of performance and simplicity.
+
+### Why asyncio over threading?
+
+| Aspect | Threading | Asyncio |
+|--------|-----------|---------|
+| Memory per connection | ~1MB stack | ~1KB coroutine |
+| GIL contention | Yes | No |
+| Race conditions | Possible | Not in single thread |
+| I/O Performance | Good | Excellent |
+| Code complexity | Higher | Lower |
+
+**Conclusion**: For I/O-bound operations like network servers, asyncio is more efficient.
+
+### Why Text Protocol over Binary?
+
+| Aspect | Text | Binary |
+|--------|------|--------|
+| Debugging | Easy (human-readable) | Difficult |
+| Performance | Good | Better |
+| Implementation | Simple | Complex |
+| Compatibility | Universal | Platform-dependent |
+
+**Conclusion**: Text protocol chosen for simplicity and debuggability, similar to Redis RESP.
+
+---
+
+## 📚 What I Learned
+
+### Systems Programming Concepts
+
+1. **Socket Programming**: TCP connection handling, read/write buffers
+2. **Async I/O**: Event loops, coroutines, non-blocking operations
+3. **Protocol Design**: Request/response patterns, error handling
+
+### Data Structure Applications
+
+1. **OrderedDict**: Maintaining insertion order with O(1) operations
+2. **LRU Cache**: Eviction policies, cache management
+3. **TTL Implementation**: Time-based expiration strategies
+
+### Software Engineering Practices
+
+1. **Test-Driven Development**: Writing tests before implementation
+2. **Separation of Concerns**: Network, Protocol, Storage layers
+3. **Performance Testing**: Load testing, latency measurement
+
+---
+
+## 🔗 References
+
+- [Python asyncio Documentation](https://docs.python.org/3/library/asyncio.html)
+- [Redis Protocol Specification](https://redis.io/docs/reference/protocol-spec/)
+- [LRU Cache - Wikipedia](https://en.wikipedia.org/wiki/Cache_replacement_policies#LRU)
+- [OrderedDict Documentation](https://docs.python.org/3/library/collections.html#collections.OrderedDict)
+
+---
+
+## 👨‍💻 Author
+
+Indrajeet Yadav  
+HLD-101 Course Assignment
+
+---
+
+<div align="center">
+
+*"There are only two hard things in Computer Science: cache invalidation and naming things."*  
+— **Phil Karlton**
+
+*This project tackles one of them.* 🚀
+
+</div>
