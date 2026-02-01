@@ -1,0 +1,114 @@
+version: '3.8'
+
+# Distributed KV-Cache: 3-Node Cluster with Sharding and Replication
+#
+# Shard Distribution:
+# | Shard | Primary | Replica |
+# |-------|---------|---------|
+# |   0   | Node 1  | Node 3  |
+# |   1   | Node 2  | Node 1  |
+# |   2   | Node 3  | Node 2  |
+#
+# Usage:
+#   docker-compose up --build
+#
+# Test:
+#   echo "PUT user:alice hello" | nc localhost 7171
+#   echo "GET user:alice" | nc localhost 7172
+#   echo "GET user:alice" | nc localhost 7173
+
+services:
+  node1:
+    build: .
+    container_name: kv-cache-node1
+    hostname: node1
+    environment:
+      - NODE_ID=1
+      - NODE1_HOST=node1
+      - NODE2_HOST=node2
+      - NODE3_HOST=node3
+      - NODE1_PORT=7171
+      - NODE2_PORT=7171
+      - NODE3_PORT=7171
+    ports:
+      - '7171:7171'
+    networks:
+      - kv-network
+    command: python -m src.cluster.distributed_server --node-id 1 --port 7171
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import socket; s=socket.socket(); s.connect(('localhost', 7171)); s.close()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  node2:
+    build: .
+    container_name: kv-cache-node2
+    hostname: node2
+    environment:
+      - NODE_ID=2
+      - NODE1_HOST=node1
+      - NODE2_HOST=node2
+      - NODE3_HOST=node3
+      - NODE1_PORT=7171
+      - NODE2_PORT=7171
+      - NODE3_PORT=7171
+    ports:
+      - '7172:7171'
+    networks:
+      - kv-network
+    command: python -m src.cluster.distributed_server --node-id 2 --port 7171
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import socket; s=socket.socket(); s.connect(('localhost', 7171)); s.close()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  node3:
+    build: .
+    container_name: kv-cache-node3
+    hostname: node3
+    environment:
+      - NODE_ID=3
+      - NODE1_HOST=node1
+      - NODE2_HOST=node2
+      - NODE3_HOST=node3
+      - NODE1_PORT=7171
+      - NODE2_PORT=7171
+      - NODE3_PORT=7171
+    ports:
+      - '7173:7171'
+    networks:
+      - kv-network
+    command: python -m src.cluster.distributed_server --node-id 3 --port 7171
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import socket; s=socket.socket(); s.connect(('localhost', 7171)); s.close()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+networks:
+  kv-network:
+    driver: bridge
+    name: kv-cache-network
