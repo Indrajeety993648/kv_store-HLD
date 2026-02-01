@@ -2,7 +2,7 @@
 
 **Author:** Indrajeet Yadav  
 **Course:** HLD-101  
-**Date:** February 2026
+**Date:** 1st February 2026
 
 ---
 
@@ -12,29 +12,8 @@
 
 The distributed KV-Cache extends the single-node implementation from Assignment 2 into a **3-node cluster** with consistent hashing for sharding and synchronous replication for fault tolerance.
 
-```
-                    Client Request
-                          │
-                          ▼
-                   ┌──────────────┐
-                   │   Any Node   │ (Entry Point)
-                   └──────┬───────┘
-                          │
-              ┌───────────┼───────────┐
-              │           │           │
-              ▼           ▼           ▼
-       ┌──────────┐ ┌──────────┐ ┌──────────┐
-       │  Node 1  │ │  Node 2  │ │  Node 3  │
-       │ Port 7171│ │ Port 7172│ │ Port 7173│
-       ├──────────┤ ├──────────┤ ├──────────┤
-       │Primary: 0│ │Primary: 1│ │Primary: 2│
-       │Replica: 1│ │Replica: 2│ │Replica: 0│
-       └──────────┘ └──────────┘ └──────────┘
-              │           │           │
-              └───────────┴───────────┘
-                    Inter-node
-                  Communication
-```
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/f823d050-c24d-4153-98e0-b36c3402188e" />
+
 
 **Shard Distribution Table:**
 
@@ -69,19 +48,15 @@ def get_shard_for_key(self, key: str) -> int:
 3. If the node is the primary → process locally
 4. If not → forward request to the correct primary node and relay the response
 
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/9549f906-bab7-412e-b859-0f1987420afe" />
+
+
 ### Replication
 
 All writes (PUT/DELETE) use **synchronous replication** to ensure durability:
 
-```
-Client                Primary Node              Replica Node
-  │                        │                         │
-  │───PUT key value───────▶│                         │
-  │                        │───REPLICA PUT key val──▶│
-  │                        │                         │
-  │                        │◀──────OK stored─────────│
-  │◀───────OK stored───────│                         │
-```
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/d328f0ef-1f9d-439c-ada3-d724c6c6ec0f" />
+
 
 **Key Implementation Details:**
 
@@ -150,6 +125,8 @@ Network partitions create the most challenging scenarios in distributed systems.
 
 - **CP systems** (like our synchronous replication) sacrifice availability—writes fail if replica is unreachable
 - **AP systems** (like DynamoDB in some modes) sacrifice consistency—both partitions accept writes, merge later
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/91f9cbdf-ffb9-4320-8675-66373473abb9" />
+
 
 Redis Cluster is CP—it sacrifices availability during network partitions rather than risk inconsistent data.
 
@@ -159,12 +136,8 @@ Redis Cluster is CP—it sacrifices availability during network partitions rathe
 
 **Synchronous Replication (our implementation):**
 
-```
-Client ──PUT──▶ Primary ──replicate──▶ Replica
-                   │                      │
-                   │◀────────OK───────────│
-Client ◀──OK───────│
-```
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/c9236ae3-94fc-4480-a04f-779b293b2eaf" />
+
 
 | Pros                                  | Cons                                         |
 | ------------------------------------- | -------------------------------------------- |
